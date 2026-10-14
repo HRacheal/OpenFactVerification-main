@@ -55,9 +55,8 @@ def test_pages_carry_kweli_lens_branding(client, path, status):
     assert "<title>" in html and "Kweli Lens AI</title>" in html  # browser tab
     assert re.search(r'class="brand"[^>]*>.*Kweli Lens AI</a>', html)  # header
     assert "Kweli Lens AI assists journalists" in html  # footer
-    # Upstream attribution and licence are kept.
-    assert "https://github.com/Libr-AI/OpenFactVerification" in html and "Loki (OpenFactVerification)" in html
-    assert "MIT licence" in html
+    # The upstream attribution is not shown in the UI (the MIT notice stays in LICENSE).
+    assert "Loki (OpenFactVerification)" not in html and "MIT licence" not in html
     assert "TruthLens" not in html
 
 
