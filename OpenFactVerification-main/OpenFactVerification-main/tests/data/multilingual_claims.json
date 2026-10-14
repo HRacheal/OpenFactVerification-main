@@ -1,0 +1,107 @@
+{
+  "description": "Small reference set of simple, independently verifiable claims in English, Swahili and Luganda. Used (a) offline in tests/test_pipeline.py with simulated evidence to check that wording is preserved and routing works, and (b) live by script/eval_multilingual.py to measure real behaviour.",
+  "review_status": "The Swahili and Luganda sentences were drafted with AI assistance and have NOT yet been reviewed by native speakers. Please have a fluent speaker check them before treating results as a language-quality measure.",
+  "reference_note": "Reference excerpts are short paraphrased facts used only as simulated evidence. The URLs are the public pages a journalist would use to confirm them; open them to verify.",
+  "cases": [
+    {
+      "id": "en-1", "language": "en", "country": "Rwanda",
+      "claim": "Kigali is the capital of Rwanda.",
+      "english_gloss": "Kigali is the capital of Rwanda.",
+      "expected_verdict": "SUPPORTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Kigali", "source_type": "unknown", "excerpt": "Kigali is the capital and largest city of Rwanda."},
+        {"url": "https://www.britannica.com/place/Kigali", "source_type": "unknown", "excerpt": "Kigali, capital of Rwanda."}
+      ]
+    },
+    {
+      "id": "en-2", "language": "en", "country": "Uganda",
+      "claim": "Uganda gained independence in 1975.",
+      "english_gloss": "Uganda gained independence in 1975.",
+      "expected_verdict": "CONTRADICTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Uganda", "source_type": "unknown", "excerpt": "Uganda gained independence from the United Kingdom on 9 October 1962."},
+        {"url": "https://www.britannica.com/place/Uganda", "source_type": "unknown", "excerpt": "Uganda became independent on October 9, 1962."}
+      ]
+    },
+    {
+      "id": "sw-1", "language": "sw", "country": "Kenya",
+      "claim": "Nairobi ni mji mkuu wa Kenya.",
+      "english_gloss": "Nairobi is the capital city of Kenya.",
+      "expected_verdict": "SUPPORTED",
+      "reference_evidence": [
+        {"url": "https://sw.wikipedia.org/wiki/Nairobi", "source_type": "unknown", "excerpt": "Nairobi ni mji mkuu wa Kenya."},
+        {"url": "https://www.britannica.com/place/Nairobi", "source_type": "unknown", "excerpt": "Nairobi, city, capital of Kenya."}
+      ]
+    },
+    {
+      "id": "sw-2", "language": "sw", "country": "Kenya",
+      "claim": "Mlima Kilimanjaro uko nchini Kenya.",
+      "english_gloss": "Mount Kilimanjaro is in Kenya.",
+      "expected_verdict": "CONTRADICTED",
+      "reference_evidence": [
+        {"url": "https://sw.wikipedia.org/wiki/Kilimanjaro", "source_type": "unknown", "excerpt": "Kilimanjaro ni mlima mrefu kuliko yote barani Afrika, uko kaskazini mwa Tanzania."},
+        {"url": "https://www.britannica.com/place/Kilimanjaro", "source_type": "unknown", "excerpt": "Kilimanjaro, volcanic massif in northeastern Tanzania."}
+      ]
+    },
+    {
+      "id": "sw-3", "language": "sw", "country": "Kenya",
+      "claim": "Kenya ilipata uhuru mwaka 1963.",
+      "english_gloss": "Kenya gained independence in 1963.",
+      "expected_verdict": "SUPPORTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Kenya", "source_type": "unknown", "excerpt": "Kenya gained independence on 12 December 1963."},
+        {"url": "https://www.britannica.com/place/Kenya", "source_type": "unknown", "excerpt": "Kenya achieved independence in 1963."}
+      ]
+    },
+    {
+      "id": "sw-4", "language": "sw", "country": "Uganda",
+      "claim": "Uganda ilipata uhuru mwaka 1975.",
+      "english_gloss": "Uganda gained independence in 1975.",
+      "expected_verdict": "CONTRADICTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Uganda", "source_type": "unknown", "excerpt": "Uganda gained independence from the United Kingdom on 9 October 1962."},
+        {"url": "https://www.britannica.com/place/Uganda", "source_type": "unknown", "excerpt": "Uganda became independent on October 9, 1962."}
+      ]
+    },
+    {
+      "id": "lg-1", "language": "lg", "country": "Uganda",
+      "claim": "Kampala kye kibuga ekikulu ekya Uganda.",
+      "english_gloss": "Kampala is the capital city of Uganda.",
+      "expected_verdict": "SUPPORTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Kampala", "source_type": "unknown", "excerpt": "Kampala is the capital and largest city of Uganda."},
+        {"url": "https://www.britannica.com/place/Kampala", "source_type": "unknown", "excerpt": "Kampala, capital of Uganda."}
+      ]
+    },
+    {
+      "id": "lg-2", "language": "lg", "country": "Uganda",
+      "claim": "Kampala kye kibuga ekikulu ekya Kenya.",
+      "english_gloss": "Kampala is the capital city of Kenya.",
+      "expected_verdict": "CONTRADICTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Kampala", "source_type": "unknown", "excerpt": "Kampala is the capital and largest city of Uganda."},
+        {"url": "https://www.britannica.com/place/Nairobi", "source_type": "unknown", "excerpt": "Nairobi, city, capital of Kenya."}
+      ]
+    },
+    {
+      "id": "lg-3", "language": "lg", "country": "Uganda",
+      "claim": "Uganda yafuna obwetwaze mu mwaka gwa 1962.",
+      "english_gloss": "Uganda gained independence in 1962.",
+      "expected_verdict": "SUPPORTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Uganda", "source_type": "unknown", "excerpt": "Uganda gained independence from the United Kingdom on 9 October 1962."},
+        {"url": "https://www.britannica.com/place/Uganda", "source_type": "unknown", "excerpt": "Uganda became independent on October 9, 1962."}
+      ]
+    },
+    {
+      "id": "lg-4", "language": "lg", "country": "Rwanda",
+      "claim": "Kigali kye kibuga ekikulu ekya Rwanda.",
+      "english_gloss": "Kigali is the capital city of Rwanda.",
+      "expected_verdict": "SUPPORTED",
+      "reference_evidence": [
+        {"url": "https://en.wikipedia.org/wiki/Kigali", "source_type": "unknown", "excerpt": "Kigali is the capital and largest city of Rwanda."},
+        {"url": "https://www.britannica.com/place/Kigali", "source_type": "unknown", "excerpt": "Kigali, capital of Rwanda."}
+      ]
+    }
+  ]
+}

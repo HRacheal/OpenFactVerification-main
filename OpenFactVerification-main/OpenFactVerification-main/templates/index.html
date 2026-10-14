@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="intro">
+  <h1>Check a claim against online evidence</h1>
+  <p>Paste text, a link, or upload an image, audio or video. Kweli Lens extracts the factual claims, searches
+    the web for evidence, and shows what supports or contradicts each claim, with links to every source.
+    Focused on East Africa (Kenya, Uganda, Rwanda), working in English, Swahili and Luganda.</p>
+</section>
+
+{% if not status.llm_ready or not status.search_ready %}
+<div class="alert alert-warn" role="alert">
+  <strong>Setup needed.</strong>
+  {% if not status.llm_ready %}The AI model key <code>{{ status.llm_key_name }}</code> is not set. {% endif %}
+  {% if not status.search_ready %}The evidence search key <code>SERPER_API_KEY</code> is not set. {% endif %}
+  Copy <code>.env.example</code> to <code>.env</code>, add your keys, and restart the app.
+</div>
+{% endif %}
+
+{% if error %}<div class="alert alert-error" role="alert"><strong>Could not start the check.</strong> {{ error }}</div>{% endif %}
+
+<form class="card check-form" method="post" action="{{ url_for('check') }}" enctype="multipart/form-data" id="check-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% set itype = form.input_type or 'text' %}
+  <fieldset class="tabs">
+    <legend>What do you want to check?</legend>
+    {% for value, label in [('text','Text'),('url','Web link'),('image','Image'),('audio','Audio'),('video','Video')] %}
+    <label class="tab"><input type="radio" name="input_type" value="{{ value }}" {% if itype == value %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+  </fieldset>
+
+  <div class="panel" data-panel="text">
+    <label for="text">Text or social media caption</label>
+    <textarea id="text" name="text" rows="7" maxlength="{{ MAX_TEXT_CHARS }}" placeholder="e.g. Kenya introduced a new education policy in 2026, reducing university fees by 50%.">{{ form.text }}</textarea>
+    <p class="hint">Up to {{ MAX_TEXT_CHARS }} characters.</p>
+  </div>
+  <div class="panel" data-panel="url">
+    <label for="url">Article or web page link</label>
+    <input id="url" name="url" type="url" inputmode="url" placeholder="https://www.example.co.ug/news/..." value="{{ form.url }}">
+    <p class="hint">Public http(s) pages only. Pages behind logins or paywalls cannot be read.</p>
+  </div>
+  {% for kind in ['image', 'audio', 'video'] %}
+  <div class="panel" data-panel="{{ kind }}">
+    <label for="file-{{ kind }}">Upload {{ kind }}</label>
+    <input id="file-{{ kind }}" name="file" type="file" accept="{% for e in UPLOAD_LIMITS[kind][1] %}.{{ e }}{% if not loop.last %},{% endif %}{% endfor %}">
+    <p class="hint">Allowed: {{ UPLOAD_LIMITS[kind][1]|join(', ')|upper }}. Max {{ (UPLOAD_LIMITS[kind][0] / 1048576)|int }} MB.
+      {% if kind == 'image' %}Text in the image is read by AI.{% endif %}
+      {% if kind == 'audio' %}Speech is transcribed with OpenAI speech-to-text{% if not status.transcription_ready %} <strong>(needs OPENAI_API_KEY, not set)</strong>{% endif %}.{% endif %}
+      {% if kind == 'video' %}Up to 8 frames are sampled for on-screen text and the audio is transcribed{% if not status.ffmpeg_ready %} <strong>(ffmpeg not found, audio will be skipped)</strong>{% endif %}.{% endif %}
+    </p>
+  </div>
+  {% endfor %}
+
+  <div class="grid-3">
+    <div>
+      <label for="country">Country / region</label>
+      <select id="country" name="country">
+        <option value="">Not specified</option>
+        {% for c in COUNTRIES %}<option value="{{ c }}" {% if form.country == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        <option value="International" {% if form.country == 'International' %}selected{% endif %}>International</option>
+      </select>
+    </div>
+    <div>
+      <label for="language">Language of the content</label>
+      <select id="language" name="language">
+        {% for k, v in LANGUAGES.items() %}<option value="{{ k }}" {% if form.language == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="output_language">Explain results in</label>
+      <select id="output_language" name="output_language">
+        {% for k, v in OUTPUT_LANGUAGES.items() %}<option value="{{ k }}" {% if form.output_language == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <button class="btn-primary" type="submit" id="submit-btn">Check claims</button>
+  <p class="hint">A check usually takes 30-90 seconds and uses paid API calls (AI model and web search).</p>
+</form>
+
+<section class="card status-card">
+  <h2>System status</h2>
+  <ul class="status-list">
+    <li>AI model: <strong>{{ status.provider }}</strong> / <code>{{ status.model }}</code>: {{ 'ready' if status.llm_ready else 'key missing' }}</li>
+    <li>Evidence search (Serper): {{ 'ready' if status.search_ready else 'key missing' }}</li>
+    <li>Image analysis: {{ 'ready' if status.vision_ready else 'not available' }}</li>
+    <li>Audio transcription: {{ 'ready' if status.transcription_ready else 'needs OPENAI_API_KEY' }}</li>
+    <li>Video audio extraction (ffmpeg): {{ 'found' if status.ffmpeg_ready else 'not found' }}</li>
+  </ul>
+</section>
+{% endblock %}

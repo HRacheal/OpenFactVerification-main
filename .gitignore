@@ -1,0 +1,4 @@
+# Secrets: never commit any .env file at any depth (the real one lives in OpenFactVerification-main/.env).
+.env
+.env.*
+!.env.example

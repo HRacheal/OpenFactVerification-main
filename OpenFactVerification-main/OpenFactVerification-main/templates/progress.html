@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Checking... - Kweli Lens AI{% endblock %}
+{% block content %}
+<section class="card progress-card" id="progress" data-status-url="{{ url_for('job_status', job_id=job_id) }}" data-report-url="{{ url_for('report', job_id=job_id) }}">
+  <h1>Checking your content</h1>
+  <div class="spinner" aria-hidden="true"></div>
+  <p class="progress-message" id="progress-message" role="status" aria-live="polite">{{ job.message }}</p>
+  <ol class="stages">
+    <li data-stage="input">Read the content</li>
+    <li data-stage="claims">Extract claims</li>
+    <li data-stage="checkworthy">Decide what can be verified</li>
+    <li data-stage="search">Search for evidence</li>
+    <li data-stage="verify">Assess each piece of evidence</li>
+    <li data-stage="verdict">Apply verdict rules</li>
+  </ol>
+  {% if job.state == 'error' %}
+  <div class="alert alert-error" id="progress-error" role="alert"><strong>The check failed.</strong> {{ job.error }}</div>
+  {% else %}
+  <div class="alert alert-error hidden" id="progress-error" role="alert"></div>
+  {% endif %}
+  <p class="hint">Keep this page open. Without JavaScript, <a href="{{ url_for('job_page', job_id=job_id) }}">refresh</a> to see progress.</p>
+  <p><a href="{{ url_for('index') }}">Start a new check</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "openfactverification"
+version = "0.1.0"
+packages = [
+    {include = "factcheck"}
+]
+description = "Kweli Lens AI: evidence-based fact-checking for East African journalists, built on Loki"
+authors = [
+    "Hao Wang <hao.wang@librai.tech>",
+    "Yuxia Wang <yuxia.wang@mbzuai.ac.ae>",
+    "Minghan Wang <minghan.wang@monash.edu>",
+    "Yilin Geng <yilin.geng@librai.tech>",
+    "Zhen Zhao <zz15391774262@outlook.com>",
+    "Preslav Nakov <preslav.nakov@mbzuai.ac.ae>",
+    "Timothy Baldwin <timothy.baldwin@mbzuai.ac.ae>",
+    "Zenan Zhai <zenan.zhai@librai.tech>",
+    "Xudong Han <xudong.han@librai.tech>",
+    "Haonan Li <haonan.li@librai.tech>"
+]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Libr-AI/OpenFactVerification/"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+anthropic = ">=0.60.0"
+backoff = "^2.2.1"
+beautifulsoup4 = "^4.12"
+Flask = { version = "^3.0.3", optional = true }
+google-genai = ">=1.0.0"
+httpx = ">=0.27.0"
+openai = ">=1.40.0"
+opencv-python-headless = ">=4.9.0"
+python-dotenv = "^1.0.0"
+pyyaml = "^6.0"
+requests = "^2.31"
+tiktoken = ">=0.6.0"
+
+[tool.poetry.extras]
+api = ["Flask"]
+
+[tool.pytest.ini_options]
+# script/ holds live-API helper scripts (e.g. minimal_test.py), not offline tests.
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

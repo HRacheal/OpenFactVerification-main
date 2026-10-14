@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}How it works - Kweli Lens AI{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>How Kweli Lens AI works</h1>
+  <ol>
+    <li><strong>Read the input.</strong> Text is used as-is. Links are fetched safely and the article text extracted.
+      Images are read by an AI vision model; audio is transcribed; videos are sampled (a few frames plus the audio track).</li>
+    <li><strong>Extract claims.</strong> An AI model lists the distinct factual statements, keeping the original
+      language, numbers, dates and qualifiers.</li>
+    <li><strong>Decide what can be checked.</strong> Opinions, predictions and vague statements are marked "Not checkable".</li>
+    <li><strong>Search for evidence.</strong> Web searches (Google via Serper) are run in the claim's language and English,
+      biased toward the selected country. Each result page is read where possible.</li>
+    <li><strong>Assess each piece of evidence.</strong> The AI labels each excerpt as supporting, contradicting,
+      partly supporting, context, or not relevant, using only that excerpt, and must quote the exact passage it relied on.
+      Quotes are checked against the source text; an unverifiable quote downgrades the judgement to "inferred".</li>
+    <li><strong>Apply fixed verdict rules</strong> (below). The AI does not choose the verdict.</li>
+  </ol>
+</section>
+
+<section class="card" id="verdicts">
+  <h2>Verdict rules</h2>
+  <dl class="verdict-defs">
+    <dt><span class="verdict verdict-supported">✔ Supported</span></dt><dd>Reliable, independent evidence supports the claim and no comparable evidence contradicts it.</dd>
+    <dt><span class="verdict verdict-contradicted">✖ Contradicted</span></dt><dd>Reliable, independent evidence directly conflicts with the claim and no comparable evidence supports it.</dd>
+    <dt><span class="verdict verdict-mixed">◐ Mixed / conflicting</span></dt><dd>The claim is only partly right, or credible sources disagree.</dd>
+    <dt><span class="verdict verdict-insufficient_evidence">? Insufficient evidence</span></dt><dd>Not enough strong evidence was found to conclude either way. <strong>This never means "false".</strong></dd>
+  </dl>
+  <h3>How evidence is weighted</h3>
+  <p>Only evidence that supports, contradicts or partly supports the claim counts. Each piece gets a weight:</p>
+  <ul>
+    <li>Basis: explicitly stated with a verified quote = {{ basis_weight.explicit }}, inferred = {{ basis_weight.inferred }}</li>
+    <li>Source type (from the domain only): government/intergovernmental, academic and fact-checkers = {{ source_weight.official }};
+      news outlets = {{ source_weight.news }}; other websites = {{ source_weight.unknown }}; social media = {{ source_weight.social }}</li>
+    <li>Search snippet only (page could not be read): × {{ snippet_weight }}</li>
+  </ul>
+  <p>Pages from the same website count as one source. A side is <em>established</em> when its total weight reaches 1.0
+    (e.g. one explicit official statement, or two explicit statements from different news outlets).
+    If both sides are established, or the stronger side is less than twice the weaker, the verdict is Mixed.
+    If neither side is established, the verdict is Insufficient evidence.</p>
+  <p><strong>Evidence strength</strong> (low / moderate / high) reflects how much weighted evidence backs the verdict
+    (below 1.5, 1.5-3, 3 and above). It is not a probability that the claim is true.</p>
+  <p>Source types are a rough hint based on the website address. A source on a preferred list can still be wrong;
+    always open and judge the sources yourself.</p>
+</section>
+
+<section class="card">
+  <h2>Known limitations</h2>
+  <ul>
+    <li>Search results depend on what is indexed online; local-language and offline sources are under-represented.</li>
+    <li>Luganda support is experimental: AI models and search engines have limited Luganda coverage, so claim extraction,
+      transcription and explanations may contain errors. Swahili is better supported but still machine-generated.</li>
+    <li>Pages behind paywalls, logins or heavy JavaScript cannot be read; the snippet is used instead and flagged.</li>
+    <li>Video analysis samples a few frames; brief on-screen text can be missed. Only the first 10 minutes are analysed.</li>
+    <li>Text read from images and audio transcripts may contain errors. They describe what the media says, not whether it is true.</li>
+  </ul>
+</section>
+{% endblock %}
