@@ -44,9 +44,12 @@
     <input id="file-{{ kind }}" name="file" type="file" accept="{% for e in UPLOAD_LIMITS[kind][1] %}.{{ e }}{% if not loop.last %},{% endif %}{% endfor %}">
     <p class="hint">Allowed: {{ UPLOAD_LIMITS[kind][1]|join(', ')|upper }}. Max {{ (UPLOAD_LIMITS[kind][0] / 1048576)|int }} MB.
       {% if kind == 'image' %}Text in the image is read by AI.{% endif %}
-      {% if kind == 'audio' %}Speech is transcribed with OpenAI speech-to-text{% if not status.transcription_ready %} <strong>(needs OPENAI_API_KEY, not set)</strong>{% endif %}.{% endif %}
-      {% if kind == 'video' %}Up to 8 frames are sampled for on-screen text and the audio is transcribed{% if not status.ffmpeg_ready %} <strong>(ffmpeg not found, audio will be skipped)</strong>{% endif %}.{% endif %}
+      {% if kind == 'audio' %}Speech is transcribed on this server with the open-source Whisper model (no audio is sent to a transcription service).
+        Only the first {{ format_timestamp(status.max_audio_seconds) }} (min:sec) are transcribed. You review the transcript before anything is fact-checked.{% endif %}
+      {% if kind == 'video' %}The audio track is extracted with FFmpeg and transcribed locally; up to 8 frames are sampled separately for on-screen text.
+        You review the transcript before anything is fact-checked.{% if not status.ffmpeg_ready %} <strong>(FFmpeg not found: speech in videos cannot be transcribed.)</strong>{% endif %}{% endif %}
     </p>
+    {% if kind in ('audio', 'video') and not status.transcription_ready %}<p class="alert alert-warn">{{ status.transcription_reason }}</p>{% endif %}
   </div>
   {% endfor %}
 
@@ -74,7 +77,7 @@
   </div>
 
   <button class="btn-primary" type="submit" id="submit-btn">Check claims</button>
-  <p class="hint">A check usually takes 30-90 seconds and uses paid API calls (AI model and web search).</p>
+  <p class="hint">A text check usually takes 30-90 seconds and uses paid API calls (AI model and web search). Transcription is free but can take several minutes on a CPU.</p>
 </form>
 
 <section class="card status-card">
@@ -83,7 +86,7 @@
     <li>AI model: <strong>{{ status.provider }}</strong> / <code>{{ status.model }}</code>: {{ 'ready' if status.llm_ready else 'key missing' }}</li>
     <li>Evidence search (Serper): {{ 'ready' if status.search_ready else 'key missing' }}</li>
     <li>Image analysis: {{ 'ready' if status.vision_ready else 'not available' }}</li>
-    <li>Audio transcription: {{ 'ready' if status.transcription_ready else 'needs OPENAI_API_KEY' }}</li>
+    <li>Speech transcription (local faster-whisper, model <code>{{ status.whisper_model }}</code>): {{ 'ready' if status.transcription_ready else 'off' }}</li>
     <li>Video audio extraction (ffmpeg): {{ 'found' if status.ffmpeg_ready else 'not found' }}</li>
   </ul>
 </section>

@@ -61,6 +61,16 @@ def test_metadata_is_preserved_and_country_bias_sent(monkeypatch):
     assert box["text"] == "146" and box["publisher"] == "Search engine"  # no fake URL like "Google Answer Box"
 
 
+def test_time_sensitive_claims_get_past_month_searches(monkeypatch):
+    post = FakePost(payload=SERPER_RESPONSE)
+    r = make_retriever(monkeypatch, post)
+    r.set_recent_claims({"President Ruto is dead."})
+    r.retrieve_evidence({"President Ruto is dead.": ["President Ruto is dead.", "Ruto latest news"]})
+    sent = post.sent["json"]
+    assert "tbs" not in sent[0]  # the claim itself is searched without a date limit
+    assert sent[1]["tbs"] == "qdr:m"
+
+
 def test_missing_key_raises_clear_error(monkeypatch):
     r = SerperEvidenceRetriever(api_config={})
     with pytest.raises(RetrievalError, match="SERPER_API_KEY"):

@@ -28,11 +28,19 @@ Summary of the rules
        only contradiction established              -> CONTRADICTED
 6. "Evidence strength" (low / moderate / high) describes how much weighted evidence backs the verdict.
    It is NOT a probability that the claim is true.
+7. Relevance guards, applied before the verdict (see apply_relevance_rules):
+   - Evidence the assessor marks as being about something RELATED (e.g. a fake video, a rumour or post
+     about the claim, a different event or period) is shown as context, never counted for or against.
+   - Claims about a current situation that can change (someone has died, been arrested, resigned ...)
+     with no date in the claim are "time-sensitive": deciding evidence published more than RECENT_DAYS
+     before the check is shown as context, because it cannot show the situation now. Exception: an
+     older report that someone died still supports a claim that they are dead (death is permanent).
 """
 
 from __future__ import annotations
 
 import re
+from datetime import date, datetime, timedelta
 
 from factcheck.utils.sources import site_key, get_domain
 from factcheck.utils.data_class import (
@@ -48,12 +56,24 @@ SNIPPET_ONLY_WEIGHT = 0.7
 ESTABLISHED = 1.0
 DOMINANCE_RATIO = 2.0
 
+RECENT_DAYS = 30
+
+# Plain-language labels shown to users. The internal verdict codes are unchanged (JSON compatibility).
 VERDICT_LABELS = {
-    VERDICT_SUPPORTED: "Supported",
-    VERDICT_CONTRADICTED: "Contradicted",
-    VERDICT_MIXED: "Mixed / conflicting",
-    VERDICT_INSUFFICIENT: "Insufficient evidence",
+    VERDICT_SUPPORTED: "True",
+    VERDICT_CONTRADICTED: "False",
+    VERDICT_MIXED: "Partly true / disputed",
+    VERDICT_INSUFFICIENT: "Unverified",
     "NOT_CHECKABLE": "Not checkable",
+}
+# One-sentence meaning of each verdict, shown under the verdict.
+VERDICT_HEADLINES = {
+    VERDICT_SUPPORTED: "Reliable evidence found during this check supports the claim.",
+    VERDICT_CONTRADICTED: "Reliable evidence found during this check contradicts the claim.",
+    VERDICT_MIXED: "Part of the claim is supported but part is not, or reliable sources disagree.",
+    VERDICT_INSUFFICIENT: "There is not enough reliable evidence to confirm or rule out this claim. "
+                          "This does not mean the claim is false.",
+    "NOT_CHECKABLE": "This is an opinion, a prediction or too vague to check against evidence.",
 }
 
 
@@ -154,3 +174,103 @@ def evidence_notes(claim: str, evidences: list) -> list[str]:
     if not any(_get(e, "published_date") for e in relevant) and relevant:
         notes.append("Publication dates were not available for the deciding sources.")
     return notes
+
+
+# --------------------------------------------------------------------------- relevance and time
+_DEATH = (r"dead|died|dies|death|passed away|killed|murdered|assassinated|"
+          r"amefariki|amekufa|ameaga dunia|ameuawa|afudde|attiddwa")
+_CHANGEABLE = (r"arrested|detained|jailed|imprisoned|in custody|kidnapped|abducted|missing|hospitali[sz]ed|"
+               r"in hospital|critically ill|in a coma|resigned|sacked|fired|impeached|ousted|overthrown|fled|"
+               r"in exile|coup|amekamatwa|amejiuzulu|amefutwa kazi|amelazwa|ametekwa|amepotea|akwatiddwa")
+_DEATH_RE = re.compile(rf"\b({_DEATH})\b", re.I)
+_CHANGEABLE_RE = re.compile(rf"\b({_DEATH}|{_CHANGEABLE})\b", re.I)
+_DATE_IN_CLAIM_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b|\b\d{1,2}(st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|"
+                               r"sep|oct|nov|dec)[a-z]*\b", re.I)
+
+
+def is_time_sensitive(claim: str) -> bool:
+    """A claim about a current, changeable situation (alive/dead, detained, in office ...) with no stated date."""
+    return bool(_CHANGEABLE_RE.search(claim or "")) and not _DATE_IN_CLAIM_RE.search(claim or "")
+
+
+def is_death_claim(claim: str) -> bool:
+    return bool(_DEATH_RE.search(claim or ""))
+
+
+_REL_DATE_RE = re.compile(r"(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago", re.I)
+_TEXT_DATE_FORMATS = ("%b %d, %Y", "%B %d, %Y", "%d %b %Y", "%d %B %Y", "%b %d %Y", "%Y/%m/%d", "%d/%m/%Y")
+
+
+def parse_date(value, today: date | None = None) -> date | None:
+    """Parse the date formats search providers and page metadata use ("2026-10-14", "Oct 14, 2026",
+    "3 days ago"). Returns None when unknown; never guesses."""
+    if not value:
+        return None
+    text = str(value).strip()
+    today = today or date.today()
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", text)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    m = _REL_DATE_RE.search(text)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        days = {"minute": 0, "hour": 0, "day": n, "week": 7 * n, "month": 30 * n, "year": 365 * n}[unit]
+        return today - timedelta(days=days)
+    for fmt in _TEXT_DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _set(e, name, value):
+    if isinstance(e, dict):
+        e[name] = value
+    else:
+        setattr(e, name, value)
+
+
+def apply_relevance_rules(claim: str, evidences: list, today: date | None = None) -> list:
+    """Downgrade evidence that does not address the claim itself to CONTEXT, with a note explaining why.
+    Mutates and returns `evidences`."""
+    today = today or date.today()
+    time_sensitive = is_time_sensitive(claim)
+    death_claim = is_death_claim(claim)
+    for e in evidences:
+        rel = _get(e, "relationship")
+        if rel not in ("SUPPORTS", "REFUTES", "PARTIAL"):
+            continue
+        if _get(e, "scope", "direct") == "related":
+            _set(e, "relationship", "CONTEXT")
+            _set(e, "note", "This source is about a related video, post, rumour or event, not the claim itself, "
+                            "so it was not counted for or against the claim.")
+            continue
+        if not time_sensitive:
+            continue
+        published = parse_date(_get(e, "published_date"), today)
+        if published is None:
+            _set(e, "note", "Publication date unknown; this source may be out of date for a claim about the current situation.")
+        elif (today - published).days > RECENT_DAYS and not (death_claim and rel == "SUPPORTS"):
+            _set(e, "relationship", "CONTEXT")
+            _set(e, "note", f"Published {published.isoformat()}, more than {RECENT_DAYS} days before this check. "
+                            "It cannot show the current situation, so it was not counted.")
+    return evidences
+
+
+_REL_RANK = {"SUPPORTS": 0, "REFUTES": 0, "PARTIAL": 0, "CONTEXT": 1, "IRRELEVANT": 2}
+
+
+def rank_evidence(evidences: list, today: date | None = None) -> list:
+    """Most useful first: deciding evidence, then context, then irrelevant; within a group by weight,
+    then by most recent publication date."""
+    today = today or date.today()
+
+    def key(e):
+        d = parse_date(_get(e, "published_date"), today)
+        return (_REL_RANK.get(_get(e, "relationship"), 3), -evidence_weight(e), -(d.toordinal() if d else 0))
+
+    return sorted(evidences, key=key)

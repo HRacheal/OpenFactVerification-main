@@ -55,19 +55,27 @@ class SerperEvidenceRetriever:
         self.timeout = timeout
         self.country = None
         self.language = None
+        self.recent_claims = set()
 
     def set_context(self, country: str = None, language: str = None):
         self.country = country
         self.language = language
 
+    def set_recent_claims(self, claims: set):
+        """Claims about a current situation: their generated queries are limited to the past month
+        (the claim itself is still searched without a date limit)."""
+        self.recent_claims = set(claims or ())
+
     # ------------------------------------------------------------------ search
-    def _request_serper_api(self, queries: list[str]) -> list[dict]:
+    def _request_serper_api(self, queries: list[str], recent: list[bool] = None) -> list[dict]:
         if not self.serper_key:
             raise RetrievalError("Evidence search is not configured: SERPER_API_KEY is missing. Add it to your .env file.")
         gl = COUNTRY_CODES.get((self.country or "").strip().lower())
         payload = []
-        for q in queries:
+        for i, q in enumerate(queries):
             item = {"q": q, "autocorrect": False}
+            if recent and recent[i]:
+                item["tbs"] = "qdr:m"  # Google "past month"
             if gl:
                 item["gl"] = gl
             if self.language == "sw":
@@ -173,10 +181,12 @@ class SerperEvidenceRetriever:
         query_list = [q for queries in claim_queries_dict.values() for q in queries]
         if not query_list:
             return {claim: [] for claim in claim_queries_dict}
+        recent_flags = [claim in self.recent_claims and j > 0
+                        for claim, queries in claim_queries_dict.items() for j in range(len(queries))]
 
         responses = []
         for i in range(0, len(query_list), 100):
-            responses += self._request_serper_api(query_list[i : i + 100])
+            responses += self._request_serper_api(query_list[i : i + 100], recent_flags[i : i + 100])
 
         retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         claim_evidence_dict, i = {}, 0

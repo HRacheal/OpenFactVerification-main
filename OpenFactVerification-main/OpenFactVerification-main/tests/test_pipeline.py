@@ -91,3 +91,48 @@ def test_multilingual_claims_preserved_and_routed(fake_pipeline, case):
     c = res["claim_detail"][0]
     assert c["claim"] == case["claim"]  # wording unchanged (numbers, names, diacritics)
     assert c["verdict"] == case["expected_verdict"]
+
+
+def _days_ago(n):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc).date() - timedelta(days=n)).isoformat()
+
+
+def test_death_rumour_with_only_fake_video_reports_is_unverified_not_false(fake_pipeline):
+    """Simulated 'President Ruto is dead.' check where search only finds debunks of a fake video and an
+    old report: these are about related media / an old period, so no confident verdict is given."""
+    FakeRetriever.corpus = {"Ruto": [
+        ev("[X][R] A video claiming President Ruto died is doctored.", "https://pesacheck.org/fake-video", "fact_checker", date=_days_ago(3)),
+        ev("[R] President Ruto opened the trade fair.", "https://nation.africa/old", "news", date="2023-02-01"),
+        ev("[C] Profile of William Ruto.", "https://en.wikipedia.org/wiki/William_Ruto", "unknown", date=None),
+    ]}
+    res = fake_pipeline.check_text("President Ruto is dead.", country="Kenya")
+    c = res["claim_detail"][0]
+    assert c["verdict"] == "INSUFFICIENT_EVIDENCE"
+    assert all(e["relationship"] == "CONTEXT" for e in c["evidences"][:3])
+    assert any("situation that can change" in n for n in c["notes"])
+    # the explanation prompt tells the writer which sources are about related media
+    summary = [p for p in FakeLLM.prompts_seen if "You write a short, neutral explanation" in p][0]
+    assert "about a related video/post/rumour/event, not the claim itself" in summary
+    assert "Date of this check:" in summary
+
+
+def test_death_rumour_with_recent_direct_reports_is_false(fake_pipeline):
+    FakeRetriever.corpus = {"Ruto": [
+        ev("[R] President Ruto addressed Parliament on Tuesday.", "https://nation.africa/today", "news", date=_days_ago(1)),
+        ev("[R] Ruto met the AU chairperson in Nairobi.", "https://www.bbc.com/news/x", "news", date=_days_ago(2)),
+        ev("[X][R] Fake video of Ruto's funeral debunked.", "https://pesacheck.org/v", "fact_checker", date=_days_ago(2)),
+    ]}
+    res = fake_pipeline.check_text("President Ruto is dead.", country="Kenya")
+    c = res["claim_detail"][0]
+    assert c["verdict"] == "CONTRADICTED"
+    # ranked: the direct, counted reports come before the related-video context
+    assert [e["relationship"] for e in c["evidences"]] == ["REFUTES", "REFUTES", "CONTEXT"]
+
+
+def test_recent_searches_requested_for_time_sensitive_claims(fake_pipeline):
+    seen = {}
+    fake_pipeline.evidence_crawler.set_recent_claims = lambda claims: seen.setdefault("claims", claims)
+    fake_pipeline.check_text("President Ruto is dead. Kampala is the capital of Uganda.")
+    assert seen["claims"] == {"President Ruto is dead."}

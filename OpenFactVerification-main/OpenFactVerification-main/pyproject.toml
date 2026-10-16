@@ -35,6 +35,8 @@ python-dotenv = "^1.0.0"
 pyyaml = "^6.0"
 requests = "^2.31"
 tiktoken = ">=0.6.0"
+faster-whisper = ">=1.1.0"
+av = ">=11,<19"
 
 [tool.poetry.extras]
 api = ["Flask"]
@@ -42,6 +44,7 @@ api = ["Flask"]
 [tool.pytest.ini_options]
 # script/ holds live-API helper scripts (e.g. minimal_test.py), not offline tests.
 testpaths = ["tests"]
+markers = ["slow: runs the real local Whisper model (skipped if the model is not downloaded)"]
 
 [build-system]
 requires = ["poetry-core"]

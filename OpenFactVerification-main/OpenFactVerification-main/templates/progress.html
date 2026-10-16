@@ -1,10 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Checking... - Kweli Lens AI{% endblock %}
+{% block title %}{{ 'Transcribing...' if job.kind == 'transcribe' else 'Checking...' }} - Kweli Lens AI{% endblock %}
 {% block content %}
-<section class="card progress-card" id="progress" data-status-url="{{ url_for('job_status', job_id=job_id) }}" data-report-url="{{ url_for('report', job_id=job_id) }}">
+<section class="card progress-card" id="progress" data-status-url="{{ url_for('job_status', job_id=job_id) }}" data-report-url="{{ next_url }}">
+  {% if job.kind == 'transcribe' %}
+  <h1>Transcribing your recording</h1>
+  {% else %}
   <h1>Checking your content</h1>
+  {% endif %}
   <div class="spinner" aria-hidden="true"></div>
   <p class="progress-message" id="progress-message" role="status" aria-live="polite">{{ job.message }}</p>
+  {% if job.kind == 'transcribe' %}
+  <ol class="stages">
+    <li data-stage="transcribe">Extract and transcribe the speech (runs on this computer)</li>
+    <li data-stage="done">Review the transcript and choose what to fact-check</li>
+  </ol>
+  <p class="hint">Speech recognition runs locally, so the time depends on this computer's processor, the model size
+    and the length of the recording. The first transcription also downloads the speech model once.</p>
+  {% else %}
   <ol class="stages">
     <li data-stage="input">Read the content</li>
     <li data-stage="claims">Extract claims</li>
@@ -13,8 +25,9 @@
     <li data-stage="verify">Assess each piece of evidence</li>
     <li data-stage="verdict">Apply verdict rules</li>
   </ol>
+  {% endif %}
   {% if job.state == 'error' %}
-  <div class="alert alert-error" id="progress-error" role="alert"><strong>The check failed.</strong> {{ job.error }}</div>
+  <div class="alert alert-error" id="progress-error" role="alert"><strong>{{ 'Transcription failed.' if job.kind == 'transcribe' else 'The check failed.' }}</strong> {{ job.error }}</div>
   {% else %}
   <div class="alert alert-error hidden" id="progress-error" role="alert"></div>
   {% endif %}

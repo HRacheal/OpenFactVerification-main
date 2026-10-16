@@ -1,7 +1,8 @@
 """Kweli Lens AI web application (Flask).
 
 Flow: index form -> POST /check (validated, CSRF-protected) -> background job -> /job/<id> progress page
--> /report/<id>. Results are kept only in server memory for a limited time and are tied to the browser
+-> /report/<id>. Audio/video first go through a transcription job (local faster-whisper) -> /transcript/<id>,
+where the user reviews/corrects the transcript and picks what to fact-check -> POST /check as text. Results are kept only in server memory for a limited time and are tied to the browser
 session that created them (no shared response.json file).
 
 Run:  python webapp.py            (then open http://127.0.0.1:2024)
@@ -26,15 +27,18 @@ from werkzeug.exceptions import RequestEntityTooLarge
 import json
 
 from factcheck.utils.api_config import load_api_config  # also loads .env
-from factcheck.utils.llmclient import CLIENTS, LLMError, MissingCredentialsError, GPTClient
+from factcheck.utils.llmclient import CLIENTS, LLMError, MissingCredentialsError
 from factcheck.utils.llmclient.gemini_client import normalize_model as normalize_gemini_model
 from factcheck.utils.logger import CustomLogger
 from factcheck.utils.utils import load_yaml
 from factcheck.core.Retriever import RetrievalError
-from factcheck.core.Verdict import VERDICT_LABELS, SOURCE_WEIGHT, BASIS_WEIGHT, SNIPPET_ONLY_WEIGHT
+from factcheck.core.Verdict import (
+    VERDICT_LABELS, VERDICT_HEADLINES, SOURCE_WEIGHT, BASIS_WEIGHT, SNIPPET_ONLY_WEIGHT, RECENT_DAYS,
+)
 from factcheck.utils.sources import SOURCE_TYPE_LABELS
 from factcheck import inputs
 from factcheck.inputs import InputError, UPLOAD_LIMITS
+from factcheck.utils import transcription
 
 logger = CustomLogger(__name__).getlog()
 
@@ -115,13 +119,6 @@ def get_factcheck():
         return _fc_instance
 
 
-def get_transcriber(api_config: dict):
-    cfg = load_api_config(api_config)
-    if not cfg.get("OPENAI_API_KEY"):
-        return None
-    return GPTClient(model=os.environ.get("TRUTHLENS_MODEL_OPENAI", "gpt-4.1-mini"), api_config=cfg)
-
-
 def config_status() -> dict:
     cfg = load_api_config(SETTINGS["api_config"])
     try:
@@ -131,13 +128,17 @@ def config_status() -> dict:
     key_name = LLM_KEY_NAMES.get(provider)
     from factcheck.utils.multimodal import find_ffmpeg
 
+    transcription_ready, transcription_reason = transcription.enabled()
     return {
         "provider": provider,
         "model": model,
         "llm_ready": bool(key_name and cfg.get(key_name)),
         "llm_key_name": key_name,
         "search_ready": bool(cfg.get("SERPER_API_KEY")),
-        "transcription_ready": bool(cfg.get("OPENAI_API_KEY")),
+        "transcription_ready": transcription_ready,
+        "transcription_reason": transcription_reason,
+        "whisper_model": transcription.settings()["model"],
+        "max_audio_seconds": transcription.settings()["max_seconds"],
         "vision_ready": provider in ("gpt", "claude", "gemini") and bool(key_name and cfg.get(key_name)),
         "ffmpeg_ready": bool(find_ffmpeg()),
     }
@@ -172,13 +173,10 @@ def run_job(job_id: str, submission: dict, workdir: str | None):
         elif itype == "url":
             progress("input", "Fetching and reading the web page")
             media = inputs.prepare_url(submission["url"])
-        else:
+        else:  # image (audio/video are transcribed first, then submitted as text)
             fc = get_factcheck()
-            progress("input", {"image": "Reading text in the image", "audio": "Transcribing the audio",
-                               "video": "Sampling frames and transcribing the video"}[itype])
-            media = inputs.prepare_media(
-                itype, submission["path"], vision_client=fc.vision_client, transcriber=get_transcriber(SETTINGS["api_config"])
-            )
+            progress("input", "Reading text in the image")
+            media = inputs.prepare_media(itype, submission["path"], vision_client=fc.vision_client)
         fc = get_factcheck()
         result = fc.check_text(
             media.text,
@@ -187,11 +185,12 @@ def run_job(job_id: str, submission: dict, workdir: str | None):
             output_language=submission["output_language"],
             progress=progress,
         )
+        source = submission.get("source")  # set when the text is a reviewed audio/video transcript
         result["input"] = {
-            "type": itype,
-            "filename": submission.get("filename", ""),
-            "extracted": media.extracted,
-            "notes": media.notes,
+            "type": source["type"] if source else itype,
+            "filename": source["filename"] if source else submission.get("filename", ""),
+            "extracted": source["extracted"] if source else media.extracted,
+            "notes": source["notes"] if source else media.notes,
         }
         _update(job_id, state="done", stage="done", message="Report ready", result=result)
     except (InputError, RetrievalError, LLMError) as e:
@@ -202,6 +201,39 @@ def run_job(job_id: str, submission: dict, workdir: str | None):
     finally:
         if workdir:
             shutil.rmtree(workdir, ignore_errors=True)  # uploaded files are never kept
+
+
+def run_transcription_job(job_id: str, submission: dict, workdir: str):
+    """Transcribe uploaded audio/video locally. The result waits for the user's review; nothing is fact-checked yet."""
+    def progress(message):
+        _update(job_id, stage="transcribe", message=message)
+
+    try:
+        itype = submission["input_type"]
+        vision_client = None
+        if itype == "video" and submission.get("vision_ready"):
+            try:
+                vision_client = get_factcheck().vision_client
+            except LLMError:
+                vision_client = None
+        progress("Preparing the recording")
+        media = inputs.prepare_media(itype, submission["path"], vision_client=vision_client,
+                                     transcriber=transcription.get_transcriber(), language=submission["language"],
+                                     progress=progress)
+        _update(job_id, state="done", stage="done", message="Transcript ready for review", transcript={
+            "type": itype,
+            "filename": submission.get("filename", ""),
+            "extracted": media.extracted,
+            "notes": media.notes,
+            "settings": {k: submission[k] for k in ("country", "language", "output_language")},
+        })
+    except InputError as e:
+        _update(job_id, state="error", error=str(e))
+    except Exception:
+        logger.error(f"Transcription job {job_id} failed:\n{traceback.format_exc()}")
+        _update(job_id, state="error", error="An unexpected error occurred while transcribing this file. See the server log for details.")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)  # the recording and any extracted audio are never kept
 
 
 def get_job_or_404(job_id: str) -> dict:
@@ -261,6 +293,9 @@ app.jinja_env.filters["fmt_date"] = fmt_date
 app.jinja_env.globals.update(
     csrf_token=csrf_token,
     VERDICT_LABELS=VERDICT_LABELS,
+    VERDICT_HEADLINES=VERDICT_HEADLINES,
+    RECENT_DAYS=RECENT_DAYS,
+    format_timestamp=transcription.format_timestamp,
     SOURCE_TYPE_LABELS=SOURCE_TYPE_LABELS,
     LANGUAGES=LANGUAGES,
     OUTPUT_LANGUAGES=OUTPUT_LANGUAGES,
@@ -280,7 +315,8 @@ def index():
 @app.route("/about")
 def about():
     return render_template(
-        "about.html", source_weight=SOURCE_WEIGHT, basis_weight=BASIS_WEIGHT, snippet_weight=SNIPPET_ONLY_WEIGHT
+        "about.html", source_weight=SOURCE_WEIGHT, basis_weight=BASIS_WEIGHT, snippet_weight=SNIPPET_ONLY_WEIGHT,
+        recent_days=RECENT_DAYS,
     )
 
 
@@ -292,6 +328,7 @@ def _form_error(message: str, form: dict, code: int = 400):
 def check():
     owner = ensure_owner()
     form = {k: request.form.get(k, "") for k in ("input_type", "text", "url", "country", "language", "output_language")}
+    transcript_id = request.form.get("transcript_id", "")
     token = request.form.get("csrf_token", "")
     if not token or not secrets.compare_digest(token, session.get("csrf", "")):
         return _form_error("Your session expired. Please submit the form again.", form, 400)
@@ -304,17 +341,34 @@ def check():
     output_language = form["output_language"] if form["output_language"] in OUTPUT_LANGUAGES else "en"
 
     status = config_status()
-    if not status["llm_ready"]:
-        return _form_error(f"The AI model is not configured: set {status['llm_key_name']} in your .env file and restart.", form, 503)
-    if not status["search_ready"]:
-        return _form_error("Evidence search is not configured: set SERPER_API_KEY in your .env file and restart.", form, 503)
+    media_upload = itype in ("audio", "video")
+    if media_upload:
+        # Transcription runs locally and needs no API key; the fact-check that follows does.
+        if itype == "audio" and not status["transcription_ready"]:
+            return _form_error(status["transcription_reason"], form, 503)
+        if itype == "video" and not status["transcription_ready"] and not status["vision_ready"]:
+            return _form_error(status["transcription_reason"], form, 503)
+    else:
+        if not status["llm_ready"]:
+            return _form_error(f"The AI model is not configured: set {status['llm_key_name']} in your .env file and restart.", form, 503)
+        if not status["search_ready"]:
+            return _form_error("Evidence search is not configured: set SERPER_API_KEY in your .env file and restart.", form, 503)
 
     submission = {"input_type": itype, "country": country if country != "International" else "", "language": language,
-                  "output_language": output_language}
+                  "output_language": output_language, "vision_ready": status["vision_ready"]}
     workdir = None
     try:
         if itype == "text":
-            submission["text"] = inputs.prepare_text(form["text"]).text
+            text = form["text"]
+            if transcript_id:
+                source = _transcript_source(transcript_id)
+                on_screen = source["extracted"].get("on_screen_text") or ""
+                if request.form.get("include_onscreen") and on_screen:
+                    text = (text.strip() + "\n\nText shown on screen in the video:\n" + on_screen).strip()
+                if text.strip() != (source["extracted"].get("transcript") or "").strip():
+                    source["notes"].append("You fact-checked an edited or selected part of the transcript.")
+                submission["source"] = source
+            submission["text"] = inputs.prepare_text(text).text
         elif itype == "url":
             from factcheck.utils.safe_fetch import validate_url, UnsafeURLError
 
@@ -342,31 +396,57 @@ def check():
 
     _purge_jobs()
     job_id = secrets.token_urlsafe(16)
+    kind = "transcribe" if media_upload else "check"
     with _jobs_lock:
-        _jobs[job_id] = {"owner": owner, "created": time.time(), "state": "running", "stage": "queued",
-                         "message": "Waiting to start", "error": None, "result": None}
-    _executor.submit(run_job, job_id, submission, workdir)
+        _jobs[job_id] = {"owner": owner, "created": time.time(), "state": "running", "stage": "queued", "kind": kind,
+                         "message": "Waiting to start", "error": None, "result": None, "transcript": None}
+    _executor.submit(run_transcription_job if media_upload else run_job, job_id, submission, workdir)
     return redirect(url_for("job_page", job_id=job_id), code=303)
+
+
+def _transcript_source(transcript_id: str) -> dict:
+    """The reviewed transcript's provenance (file name, transcript, on-screen text), for the report."""
+    with _jobs_lock:
+        job = _jobs.get(transcript_id)
+    if (not job or job.get("kind") != "transcribe" or job["state"] != "done"
+            or not secrets.compare_digest(job["owner"], session.get("owner", ""))):
+        raise InputError("This transcript has expired. Please upload the recording again.")
+    t = job["transcript"]
+    return {"type": t["type"], "filename": t["filename"], "extracted": dict(t["extracted"]), "notes": list(t["notes"])}
 
 
 @app.route("/job/<job_id>")
 def job_page(job_id):
     job = get_job_or_404(job_id)
     if job["state"] == "done":
-        return redirect(url_for("report", job_id=job_id))
-    return render_template("progress.html", job_id=job_id, job=job)
+        return redirect(_done_url(job_id, job))
+    return render_template("progress.html", job_id=job_id, job=job, next_url=_done_url(job_id, job))
+
+
+def _done_url(job_id: str, job: dict) -> str:
+    return url_for("transcript_page" if job.get("kind") == "transcribe" else "report", job_id=job_id)
 
 
 @app.route("/api/job/<job_id>")
 def job_status(job_id):
     job = get_job_or_404(job_id)
-    return jsonify({k: job[k] for k in ("state", "stage", "message", "error")})
+    return jsonify({**{k: job[k] for k in ("state", "stage", "message", "error")}, "next_url": _done_url(job_id, job)})
+
+
+@app.route("/transcript/<job_id>")
+def transcript_page(job_id):
+    job = get_job_or_404(job_id)
+    if job.get("kind") != "transcribe":
+        abort(404)
+    if job["state"] != "done":
+        return redirect(url_for("job_page", job_id=job_id))
+    return render_template("transcript.html", t=job["transcript"], job_id=job_id, status=config_status())
 
 
 @app.route("/report/<job_id>")
 def report(job_id):
     job = get_job_or_404(job_id)
-    if job["state"] != "done":
+    if job.get("kind") == "transcribe" or job["state"] != "done":
         return redirect(url_for("job_page", job_id=job_id))
     return render_template("report.html", r=job["result"], job_id=job_id)
 
@@ -374,7 +454,7 @@ def report(job_id):
 @app.route("/report/<job_id>.json")
 def report_json(job_id):
     job = get_job_or_404(job_id)
-    if job["state"] != "done":
+    if job["state"] != "done" or job.get("kind") == "transcribe":
         abort(404)
     body = json.dumps(job["result"], ensure_ascii=False, indent=2)
     return Response(body, mimetype="application/json",
@@ -413,6 +493,8 @@ def main():
     status = config_status()
     print(f"Kweli Lens AI | provider={status['provider']} model={status['model']} | "
           f"LLM key: {'OK' if status['llm_ready'] else 'MISSING'} | Serper key: {'OK' if status['search_ready'] else 'MISSING'}")
+    speech = f"faster-whisper {status['whisper_model']}" if status["transcription_ready"] else "OFF - " + status["transcription_reason"]
+    print(f"Speech transcription: {speech} | FFmpeg: {'found' if status['ffmpeg_ready'] else 'NOT FOUND (needed for video audio)'}")
     try:
         resolve_provider()
     except LLMError as e:

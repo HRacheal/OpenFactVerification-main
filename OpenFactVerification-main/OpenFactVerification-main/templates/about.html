@@ -5,7 +5,7 @@
   <h1>How Kweli Lens AI works</h1>
   <ol>
     <li><strong>Read the input.</strong> Text is used as-is. Links are fetched safely and the article text extracted.
-      Images are read by an AI vision model; audio is transcribed; videos are sampled (a few frames plus the audio track).</li>
+      Images are read by an AI vision model. Audio is transcribed on the server itself with the open-source Whisper speech model (faster-whisper; no transcription service or API key); for videos, FFmpeg extracts the audio track for transcription and a few frames are read separately for on-screen text. You review and correct the transcript, and choose which statements to check, before anything is fact-checked.</li>
     <li><strong>Extract claims.</strong> An AI model lists the distinct factual statements, keeping the original
       language, numbers, dates and qualifiers.</li>
     <li><strong>Decide what can be checked.</strong> Opinions, predictions and vague statements are marked "Not checkable".</li>
@@ -15,16 +15,18 @@
       partly supporting, context, or not relevant, using only that excerpt, and must quote the exact passage it relied on.
       Quotes are checked against the source text; an unverifiable quote downgrades the judgement to "inferred".</li>
     <li><strong>Apply fixed verdict rules</strong> (below). The AI does not choose the verdict.</li>
+    <li><strong>Show the verdict first,</strong> then a short plain-language explanation, then the key sources with links,
+      then related reports that were not counted.</li>
   </ol>
 </section>
 
 <section class="card" id="verdicts">
   <h2>Verdict rules</h2>
   <dl class="verdict-defs">
-    <dt><span class="verdict verdict-supported">✔ Supported</span></dt><dd>Reliable, independent evidence supports the claim and no comparable evidence contradicts it.</dd>
-    <dt><span class="verdict verdict-contradicted">✖ Contradicted</span></dt><dd>Reliable, independent evidence directly conflicts with the claim and no comparable evidence supports it.</dd>
-    <dt><span class="verdict verdict-mixed">◐ Mixed / conflicting</span></dt><dd>The claim is only partly right, or credible sources disagree.</dd>
-    <dt><span class="verdict verdict-insufficient_evidence">? Insufficient evidence</span></dt><dd>Not enough strong evidence was found to conclude either way. <strong>This never means "false".</strong></dd>
+    <dt><span class="verdict verdict-supported">✔ True</span></dt><dd>Reliable, independent evidence found during the check supports the claim and no comparable evidence contradicts it.</dd>
+    <dt><span class="verdict verdict-contradicted">✖ False</span></dt><dd>Reliable, independent evidence found during the check directly conflicts with the claim and no comparable evidence supports it.</dd>
+    <dt><span class="verdict verdict-mixed">◐ Partly true / disputed</span></dt><dd>The claim is only partly right, leaves out something important, or credible sources disagree.</dd>
+    <dt><span class="verdict verdict-insufficient_evidence">? Unverified</span></dt><dd>Not enough strong evidence was found to conclude either way. <strong>This never means "false".</strong></dd>
   </dl>
   <h3>How evidence is weighted</h3>
   <p>Only evidence that supports, contradicts or partly supports the claim counts. Each piece gets a weight:</p>
@@ -37,7 +39,17 @@
   <p>Pages from the same website count as one source. A side is <em>established</em> when its total weight reaches 1.0
     (e.g. one explicit official statement, or two explicit statements from different news outlets).
     If both sides are established, or the stronger side is less than twice the weaker, the verdict is Mixed.
-    If neither side is established, the verdict is Insufficient evidence.</p>
+    If neither side is established, the verdict is Unverified.</p>
+  <h3>Evidence about the claim, not just about the topic</h3>
+  <ul>
+    <li><strong>Related reports are not counted.</strong> A source about something connected but different, such as a fake video,
+      a rumour or post about the claim, or an earlier event, is shown under "Related reports and context". A report that a video
+      is fake shows that the video is false; it does not by itself show whether what the video claims is true.</li>
+    <li><strong>Current situations need recent evidence.</strong> For claims about a situation that can change (for example that
+      someone has died, been arrested or resigned) with no date in the claim, sources published more than {{ recent_days }} days before
+      the check are shown as context and not counted, and recent-news searches are added. One exception: an older report that a
+      person died still counts as support for a claim that they are dead.</li>
+  </ul>
   <p><strong>Evidence strength</strong> (low / moderate / high) reflects how much weighted evidence backs the verdict
     (below 1.5, 1.5-3, 3 and above). It is not a probability that the claim is true.</p>
   <p>Source types are a rough hint based on the website address. A source on a preferred list can still be wrong;

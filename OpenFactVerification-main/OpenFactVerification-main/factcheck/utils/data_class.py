@@ -53,6 +53,8 @@ class Evidence:
     source_type: str = "unknown"  # official | academic | fact_checker | news | social | unknown
     full_text_fetched: bool = False  # False => assessment based on the search snippet only
     query: str = ""
+    scope: str = "direct"  # "direct": addresses the claim itself; "related": about a related video/post/event
+    note: str = ""  # why this evidence was not counted, or a caveat (e.g. out of date)
 
     def attribute_check(self) -> bool:
         for name in ("claim", "text", "url", "reasoning", "relationship"):

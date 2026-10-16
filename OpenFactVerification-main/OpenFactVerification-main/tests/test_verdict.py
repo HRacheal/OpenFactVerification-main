@@ -80,3 +80,66 @@ def test_subdomains_of_one_site_are_not_independent():
     assert site_key("www.monitor.co.ug") == "monitor.co.ug" and site_key("statistics.go.ug") == "statistics.go.ug"
     evs = [E("SUPPORTS", "en.wikipedia.org", "unknown"), E("SUPPORTS", "sw.wikipedia.org", "unknown")]
     assert decide_verdict(evs)[0] == "INSUFFICIENT_EVIDENCE"
+
+
+# --------------------------------------------------------------------------- relevance and time rules
+from datetime import date, timedelta  # noqa: E402
+
+from factcheck.core.Verdict import apply_relevance_rules, is_time_sensitive, parse_date, rank_evidence  # noqa: E402
+
+TODAY = date(2026, 10, 16)
+
+
+def test_time_sensitive_claims_are_detected():
+    assert is_time_sensitive("President Ruto is dead.")
+    assert is_time_sensitive("Rais Ruto amefariki dunia.")
+    assert is_time_sensitive("The opposition leader has been arrested.")
+    assert not is_time_sensitive("Jomo Kenyatta died in 1978.")  # dated: a past event, not a current situation
+    assert not is_time_sensitive("Kampala is the capital of Uganda.")
+
+
+def test_parse_date_formats_and_unknowns():
+    assert parse_date("2026-10-14T08:00:00Z", TODAY) == date(2026, 10, 14)
+    assert parse_date("Oct 14, 2026", TODAY) == date(2026, 10, 14)
+    assert parse_date("3 days ago", TODAY) == date(2026, 10, 13)
+    assert parse_date("", TODAY) is None and parse_date("sometime", TODAY) is None
+
+
+def test_report_about_a_fake_video_is_context_not_evidence():
+    evs = [dict(E("REFUTES", "pesacheck.org", "fact_checker"), scope="related"),
+           dict(E("REFUTES", "africacheck.org", "fact_checker"), scope="related")]
+    apply_relevance_rules("President Ruto is dead.", evs, TODAY)
+    assert all(e["relationship"] == "CONTEXT" and "related video" in e["note"] for e in evs)
+    assert decide_verdict(evs)[0] == "INSUFFICIENT_EVIDENCE"  # not "False" on the strength of a video debunk
+
+
+def test_old_reports_do_not_decide_a_current_situation():
+    recent = (TODAY - timedelta(days=2)).isoformat()
+    old = [E("REFUTES", "nation.africa", date="2024-01-05"), E("REFUTES", "monitor.co.ug", date="2023-06-01")]
+    apply_relevance_rules("President Ruto is dead.", old, TODAY)
+    assert decide_verdict(old)[0] == "INSUFFICIENT_EVIDENCE"
+    assert all("cannot show the current situation" in e["note"] for e in old)
+    fresh = [E("REFUTES", "nation.africa", date=recent), E("REFUTES", "bbc.com", date=recent)]
+    apply_relevance_rules("President Ruto is dead.", fresh, TODAY)
+    assert decide_verdict(fresh)[0] == "CONTRADICTED"
+
+
+def test_old_death_report_still_supports_death_claim_and_undated_is_flagged():
+    evs = [E("SUPPORTS", "a.go.ke", "official", date="2019-02-01"), E("REFUTES", "blog.example", "unknown")]
+    apply_relevance_rules("The former minister is dead.", evs, TODAY)
+    assert evs[0]["relationship"] == "SUPPORTS"  # death is permanent
+    assert "date unknown" in evs[1]["note"].lower()
+
+
+def test_dated_claims_ignore_recency_rule():
+    evs = [E("SUPPORTS", "a.go.ke", "official", date="1978-08-23")]
+    apply_relevance_rules("Jomo Kenyatta died in 1978.", evs, TODAY)
+    assert evs[0]["relationship"] == "SUPPORTS" and not evs[0].get("note")
+
+
+def test_ranking_puts_strong_recent_deciding_evidence_first():
+    evs = [E("CONTEXT", "x.com"), E("SUPPORTS", "blog.example", "unknown", date="2026-10-10"),
+           E("IRRELEVANT", "y.com"), E("SUPPORTS", "a.go.ke", "official", date="2026-01-01"),
+           E("SUPPORTS", "b.go.ke", "official", date="2026-10-01")]
+    ranked = [e["domain"] for e in rank_evidence(evs, TODAY)]
+    assert ranked == ["b.go.ke", "a.go.ke", "blog.example", "x.com", "y.com"]

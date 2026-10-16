@@ -67,9 +67,13 @@ class FakeLLM(BaseClient):
             text = prompt.split("[evidence text]: ")[1].split("\n\nDecide the relationship")[0]
             rel = {"[S]": "SUPPORTS", "[R]": "REFUTES", "[P]": "PARTIAL", "[C]": "CONTEXT"}
             relationship = next((v for k, v in rel.items() if k in text), "IRRELEVANT")
-            quote = text.replace("[S]", "").replace("[R]", "").replace("[P]", "").replace("[C]", "").strip()[:60]
+            scope = "related" if "[X]" in text else "direct"  # [X]: about a related video/post, not the claim
+            for marker in ("[S]", "[R]", "[P]", "[C]", "[X]"):
+                text = text.replace(marker, "")
+            quote = text.strip()[:60]
             return json.dumps({"reasoning": f"Fake reasoning: {relationship}", "relationship": relationship,
-                               "basis": "explicit" if relationship != "IRRELEVANT" else "inferred", "quote": quote})
+                               "basis": "explicit" if relationship != "IRRELEVANT" else "inferred", "quote": quote,
+                               "scope": scope})
         if "You write a short, neutral explanation" in prompt:
             return json.dumps({"explanation": "Fake explanation."})
         return "{}"

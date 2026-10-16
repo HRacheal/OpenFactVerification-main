@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Fact-check report - Kweli Lens AI{% endblock %}
+{% set ICONS = {'SUPPORTED':'✔','CONTRADICTED':'✖','MIXED':'◐','INSUFFICIENT_EVIDENCE':'?','NOT_CHECKABLE':'–'} %}
+{% set STANCES = {'SUPPORTS':'Supports the claim','REFUTES':'Contradicts the claim','PARTIAL':'Partly supports the claim','CONTEXT':'Context only','IRRELEVANT':'Not relevant'} %}
 {% macro verdict_badge(v) -%}
-<span class="verdict verdict-{{ v|lower }}"><span class="verdict-icon" aria-hidden="true">{{ {'SUPPORTED':'✔','CONTRADICTED':'✖','MIXED':'◐','INSUFFICIENT_EVIDENCE':'?','NOT_CHECKABLE':'–'}[v] }}</span> {{ VERDICT_LABELS[v] }}</span>
+<span class="verdict verdict-{{ v|lower }}"><span class="verdict-icon" aria-hidden="true">{{ ICONS[v] }}</span> {{ VERDICT_LABELS[v] }}</span>
 {%- endmacro %}
 {% macro evidence_item(e) -%}
 <li class="evidence">
@@ -9,109 +11,145 @@
     {% set href = e.url|safe_href %}
     {% if href %}<a class="evidence-title" href="{{ href }}" target="_blank" rel="noopener noreferrer nofollow">{{ e.title or e.domain or href }}</a>
     {% else %}<span class="evidence-title">{{ e.title or 'Search engine answer (no source link provided)' }}</span>{% endif %}
-    <span class="stance stance-{{ e.relationship|lower }}">{{ {'SUPPORTS':'Supports','REFUTES':'Contradicts','PARTIAL':'Partly supports','CONTEXT':'Context','IRRELEVANT':'Not relevant'}[e.relationship] }}</span>
+    <span class="stance stance-{{ e.relationship|lower }}">{{ STANCES[e.relationship] }}</span>
   </div>
   <p class="evidence-meta">
-    {{ e.publisher or e.domain or 'Unknown publisher' }}
+    <strong>{{ e.publisher or e.domain or 'Unknown publisher' }}</strong>
     · {{ SOURCE_TYPE_LABELS.get(e.source_type, 'Other website') }}
     · Published: {{ e.published_date|fmt_date if e.published_date else 'date not available' }}
-    · Retrieved: {{ e.retrieved_at|fmt_date }}
-    · {{ 'Full page read' if e.full_text_fetched else 'Search snippet only' }}
-    · {{ 'Explicitly stated (quote verified)' if e.basis == 'explicit' else 'Inferred by AI' }}
   </p>
-  {% if href %}<p class="evidence-url">{{ href }}</p>{% endif %}
+  <p class="says"><strong>What it says:</strong> {{ e.reasoning }}</p>
   {% if e.quote %}<blockquote class="quote">“{{ e.quote }}”</blockquote>{% endif %}
-  <p class="reasoning"><strong>Assessment:</strong> {{ e.reasoning }}</p>
-  <details><summary>Show evidence excerpt (original wording)</summary><p class="excerpt">{{ e.text }}</p>
-    <p class="hint">Found with search query: {{ e.query }}</p></details>
+  {% if e.note %}<p class="evidence-note">{{ e.note }}</p>{% endif %}
+  <details><summary>More about this source</summary>
+    {% if href %}<p class="evidence-url">{{ href }}</p>{% endif %}
+    <p class="hint">Retrieved {{ e.retrieved_at|fmt_date }} ·
+      {{ 'Full page read' if e.full_text_fetched else 'Search snippet only (the page could not be read)' }} ·
+      {{ 'Stated explicitly (quote checked against the source)' if e.basis == 'explicit' else 'Inferred by AI' }} ·
+      Found with search: {{ e.query }}</p>
+    <p class="excerpt">{{ e.text }}</p></details>
 </li>
 {%- endmacro %}
 
 {% block content %}
 <section class="report-head">
-  <h1>Fact-check report</h1>
+  <h1>Fact-check result</h1>
   <p class="meta">Verification performed {{ r.verified_at|fmt_date }} (UTC {{ r.verified_at[11:16] }})
     · Country/region: {{ r.context.country or 'not specified' }}
-    · Input: {{ r.input.type }}{% if r.input.filename %} ({{ r.input.filename }}){% endif %}
     · <a href="{{ url_for('report_json', job_id=job_id) }}">Download JSON</a></p>
 </section>
 
-<div class="alert alert-info editorial" role="note">
-  <strong>Editorial reminder:</strong> this report is produced automatically. Open the sources, check the
-  evidence and context yourself, and make the final editorial decision. A verdict is not a probability that a
-  claim is true.
-</div>
-
 {% for w in r.warnings %}<div class="alert alert-warn">{{ w }}</div>{% endfor %}
 
+{# A. What the user submitted #}
+<section class="card submitted">
+  <h2 class="eyebrow">{% if r.input.type in ('audio', 'video') %}You submitted this from the {{ r.input.type }} transcript{% if r.input.filename %} of “{{ r.input.filename }}”{% endif %}{% else %}You asked us to check{% endif %}</h2>
+  {% if r.raw_text|length > 600 %}
+  <p class="pre submitted-text">{{ r.raw_text[:600] }}…</p>
+  <details><summary>Show the full text</summary><p class="pre">{{ r.raw_text }}</p></details>
+  {% else %}
+  <blockquote class="submitted-text pre">{{ r.raw_text }}</blockquote>
+  {% endif %}
+</section>
+
+{% set claims = r.claim_detail %}
+{% if claims|length > 1 %}
+<section class="card overview">
+  <h2>{{ claims|length }} claims found: results at a glance</h2>
+  <ul class="overview-list">
+    {% for c in claims %}<li><a href="#claim-{{ loop.index }}">{{ c.claim }}</a> {{ verdict_badge(c.verdict) }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% for c in claims %}
+<article class="card claim" id="claim-{{ loop.index }}">
+  <p class="claim-num">{{ 'Claim ' ~ loop.index if claims|length > 1 else 'Claim checked' }}</p>
+  <p class="claim-text">{{ c.claim }}</p>
+  {% if c.origin_text and c.origin_text != c.claim %}<p class="hint">From: “{{ c.origin_text }}”</p>{% endif %}
+
+  {# B. Verdict first #}
+  <div class="verdict-banner verdict-{{ c.verdict|lower }}" role="status">
+    <span class="verdict-banner-icon" aria-hidden="true">{{ ICONS[c.verdict] }}</span>
+    <div>
+      <p class="verdict-banner-label">Verdict: {{ VERDICT_LABELS[c.verdict] }}</p>
+      <p class="verdict-banner-text">{{ VERDICT_HEADLINES[c.verdict] }}</p>
+    </div>
+  </div>
+
+  {% if not c.checkworthy %}
+    <p><strong>Why it was not checked:</strong> {{ c.checkworthy_reason }}</p>
+  {% else %}
+    {# C. Short explanation #}
+    <h3>Why</h3>
+    <p class="explanation">{{ c.explanation }}</p>
+    {% if c.notes %}<div class="limitations"><strong>What is uncertain or limited:</strong><ul>{% for n in c.notes %}<li>{{ n }}</li>{% endfor %}</ul></div>{% endif %}
+
+    {# D. Supporting evidence: deciding sources, already ranked most useful first #}
+    {% set deciding = c.evidences|selectattr('relationship', 'in', ['SUPPORTS', 'REFUTES', 'PARTIAL'])|list %}
+    {% set context = c.evidences|selectattr('relationship', 'equalto', 'CONTEXT')|list %}
+    {% set irrelevant = c.evidences|selectattr('relationship', 'equalto', 'IRRELEVANT')|list %}
+    <h3>Key sources</h3>
+    {% if deciding %}
+    <ul class="evidence-list">{% for e in deciding[:5] %}{{ evidence_item(e) }}{% endfor %}</ul>
+    {% elif c.evidences %}
+    <p class="alert alert-warn">No source found in this check directly confirmed or contradicted the claim.</p>
+    {% else %}
+    <p class="alert alert-warn">No evidence could be retrieved for this claim.</p>
+    {% endif %}
+
+    {# E. Context: related reports (fake videos, rumours, older events) kept apart from evidence about the claim #}
+    {% if context %}
+    <h3>Related reports and context</h3>
+    <p class="hint context-intro">These reports are connected to the claim, for example about a video or post that
+      spread it, an older event, or background information. <strong>They were not counted as evidence for or against
+      the claim itself.</strong> A report that a video is fake, for instance, does not by itself show whether what
+      the video claims is true or false.</p>
+    <ul class="evidence-list">{% for e in context[:4] %}{{ evidence_item(e) }}{% endfor %}</ul>
+    {% endif %}
+
+    <details class="method"><summary>How this verdict was reached (details)</summary>
+      <p><strong>Rule applied:</strong> {{ c.verdict_reason }} <a href="{{ url_for('about') }}#verdicts">How verdicts work</a></p>
+      {% set s = c.strength %}
+      <p><strong>Evidence strength: {{ s.label }}</strong>. Supporting weight {{ s.support_weight }} from
+        {{ s.support_sources }} independent source(s); contradicting weight {{ s.contradict_weight }} from
+        {{ s.contradict_sources }} source(s). <span class="hint">This measures how much weighted evidence was found,
+        not the probability that the claim is true.</span></p>
+      {% if deciding[5:] %}<h4>More sources that support or contradict the claim</h4>
+        <ul class="evidence-list">{% for e in deciding[5:] %}{{ evidence_item(e) }}{% endfor %}</ul>{% endif %}
+      {% if context[4:] %}<h4>More context</h4>
+        <ul class="evidence-list">{% for e in context[4:] %}{{ evidence_item(e) }}{% endfor %}</ul>{% endif %}
+      {% if irrelevant %}<h4>{{ irrelevant|length }} search result(s) judged not relevant</h4>
+        <ul class="evidence-list">{% for e in irrelevant %}{{ evidence_item(e) }}{% endfor %}</ul>{% endif %}
+      <h4>Search queries used</h4><ul>{% for q in c.queries %}<li>{{ q }}</li>{% endfor %}</ul>
+      <p class="hint">Checkworthiness: {{ c.checkworthy_reason }}</p>
+    </details>
+  {% endif %}
+</article>
+{% endfor %}
+
+{% set x = r.input.extracted %}
+{% if r.input.type not in ('text',) or r.input.notes %}
 <section class="card">
-  <h2>Submitted content</h2>
-  {% set x = r.input.extracted %}
+  <h2>About the submitted content</h2>
+  <p class="hint">Input: {{ r.input.type }}{% if r.input.filename %} ({{ r.input.filename }}){% endif %}</p>
   {% if r.input.type == 'url' %}
     <p><strong>Page:</strong> {% if x.final_url|safe_href %}<a href="{{ x.final_url|safe_href }}" target="_blank" rel="noopener noreferrer nofollow">{{ x.title or x.final_url }}</a>{% endif %}
       · {{ x.publisher }} · Published: {{ x.published_date|fmt_date if x.published_date else 'not stated' }}</p>
   {% endif %}
   {% if x.visible_text is defined and x.visible_text %}<h3>Text read from the image</h3><p class="pre">{{ x.visible_text }}</p>{% endif %}
+  {% if x.transcript %}<details><summary>Full automatic transcript (speech){% if x.speech_model %}, {{ x.speech_model }}{% endif %}</summary><p class="pre">{{ x.transcript }}</p></details>{% endif %}
+  {% if x.on_screen_text %}<h3>On-screen text (separate from the speech)</h3><p class="pre">{{ x.on_screen_text }}</p>{% endif %}
   {% if x.description %}<h3>Image / video description (AI)</h3><p>{{ x.description }}</p>{% endif %}
-  {% if x.transcript %}<h3>Transcript</h3><p class="pre">{{ x.transcript }}</p>{% endif %}
-  {% if x.on_screen_text %}<h3>On-screen text</h3><p class="pre">{{ x.on_screen_text }}</p>{% endif %}
-  {% if r.input.type in ('text', 'url') %}
-  <details {% if r.input.type == 'text' %}open{% endif %}><summary>Text that was checked</summary><p class="pre">{{ r.raw_text }}</p></details>
-  {% endif %}
   {% if r.input.notes %}<ul class="notes">{% for n in r.input.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
 </section>
+{% endif %}
 
-<section class="card summary">
-  <h2>Summary</h2>
-  <p>{{ r.summary.num_claims }} claim(s) found, {{ r.summary.num_checkworthy_claims }} checked.</p>
-  <ul class="verdict-counts">
-    {% for v in ['SUPPORTED', 'CONTRADICTED', 'MIXED', 'INSUFFICIENT_EVIDENCE', 'NOT_CHECKABLE'] %}
-      {% if r.summary.verdict_counts.get(v) %}<li>{{ verdict_badge(v) }} × {{ r.summary.verdict_counts[v] }}</li>{% endif %}
-    {% endfor %}
-  </ul>
-</section>
-
-{% for c in r.claim_detail %}
-<article class="card claim" id="claim-{{ loop.index }}">
-  <div class="claim-head">
-    <span class="claim-num">Claim {{ loop.index }}</span>
-    {{ verdict_badge(c.verdict) }}
-  </div>
-  <p class="claim-text">{{ c.claim }}</p>
-  {% if c.origin_text and c.origin_text != c.claim %}<p class="hint">From: “{{ c.origin_text }}”</p>{% endif %}
-
-  {% if not c.checkworthy %}
-    <p><strong>Not fact-checked:</strong> {{ c.checkworthy_reason }}</p>
-  {% else %}
-    <p class="explanation">{{ c.explanation }}</p>
-    <p class="rule"><strong>Why this verdict (rules):</strong> {{ c.verdict_reason }}
-      <a href="{{ url_for('about') }}#verdicts">How verdicts work</a></p>
-    {% set s = c.strength %}
-    <p class="strength"><strong>Evidence strength: {{ s.label }}</strong>.
-      Supporting weight {{ s.support_weight }} from {{ s.support_sources }} independent source(s);
-      contradicting weight {{ s.contradict_weight }} from {{ s.contradict_sources }} source(s).
-      <span class="hint">This measures how much weighted evidence was found, not the probability the claim is true.</span></p>
-    {% if c.notes %}<div class="limitations"><strong>Limitations:</strong><ul>{% for n in c.notes %}<li>{{ n }}</li>{% endfor %}</ul></div>{% endif %}
-
-    {% set groups = [('SUPPORTS', 'Evidence supporting the claim'), ('REFUTES', 'Evidence contradicting the claim'), ('PARTIAL', 'Evidence that partly supports the claim'), ('CONTEXT', 'Relevant context')] %}
-    {% for rel, heading in groups %}
-      {% set items = c.evidences|selectattr('relationship', 'equalto', rel)|list %}
-      {% if items %}
-      <h3 class="group-{{ rel|lower }}">{{ heading }} ({{ items|length }})</h3>
-      <ul class="evidence-list">{% for e in items %}{{ evidence_item(e) }}{% endfor %}</ul>
-      {% endif %}
-    {% endfor %}
-    {% set irrelevant = c.evidences|selectattr('relationship', 'equalto', 'IRRELEVANT')|list %}
-    {% if irrelevant %}
-    <details><summary>{{ irrelevant|length }} search result(s) judged not relevant</summary>
-      <ul class="evidence-list">{% for e in irrelevant %}{{ evidence_item(e) }}{% endfor %}</ul></details>
-    {% endif %}
-    {% if not c.evidences %}<p class="alert alert-warn">No evidence could be retrieved for this claim.</p>{% endif %}
-    <details><summary>Search queries used</summary><ul>{% for q in c.queries %}<li>{{ q }}</li>{% endfor %}</ul></details>
-    <p class="hint">Checkworthiness: {{ c.checkworthy_reason }}</p>
-  {% endif %}
-</article>
-{% endfor %}
+<div class="alert alert-info editorial" role="note">
+  <strong>Editorial reminder:</strong> this result is produced automatically from the sources found at the time of
+  the check. Open the sources, check the evidence and context yourself, and make the final editorial decision.
+  A verdict is not a probability that a claim is true, and news can change after the check.
+</div>
 
 {% if r.context.output_language in ('sw', 'lg') %}
 <p class="alert alert-warn">Explanations were machine-written in {{ OUTPUT_LANGUAGES[r.context.output_language] }} and may contain language errors. Source excerpts are shown in their original wording.</p>

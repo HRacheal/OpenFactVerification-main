@@ -24,7 +24,16 @@ from factcheck.core import (
     retriever_mapper,
     ClaimVerify,
 )
-from factcheck.core.Verdict import decide_verdict, evidence_notes, VERDICT_LABELS
+from factcheck.core.Verdict import (
+    decide_verdict,
+    evidence_notes,
+    apply_relevance_rules,
+    rank_evidence,
+    is_time_sensitive,
+    VERDICT_LABELS,
+    VERDICT_HEADLINES,
+    RECENT_DAYS,
+)
 
 logger = CustomLogger(__name__).getlog()
 
@@ -133,7 +142,8 @@ class FactCheck:
 
         self._reset_usage()
         out_lang = LANGUAGE_NAMES.get(output_language, "English")
-        context = self.build_context(country, language)
+        today = datetime.now(timezone.utc).date()
+        context = self.build_context(country, language, today=today.isoformat())
         if hasattr(self.evidence_crawler, "set_context"):
             self.evidence_crawler.set_context(country=country, language=language)
         ctx = {"country": country or "", "language": language, "output_language": output_language}
@@ -169,6 +179,9 @@ class FactCheck:
         claim_evidences_dict, claim_verifications_dict = {}, {}
         if claim_queries_dict:
             report("search", f"Searching the web for evidence on {len(claim_queries_dict)} claim(s)")
+            if hasattr(self.evidence_crawler, "set_recent_claims"):
+                # Claims about a current situation (alive/dead, detained ...) also get recent-news searches.
+                self.evidence_crawler.set_recent_claims({c for c in claim_queries_dict if is_time_sensitive(c)})
             claim_evidences_dict = self.evidence_crawler.retrieve_evidence(claim_queries_dict=claim_queries_dict)
             n_evidence = sum(len(v) for v in claim_evidences_dict.values())
             report("verify", f"Assessing {n_evidence} evidence excerpt(s)")
@@ -182,8 +195,9 @@ class FactCheck:
             claim2checkworthy=claim2checkworthy,
             claim2queries=claim_queries_dict,
             claim2verifications=claim_verifications_dict,
+            today=today,
         )
-        self._add_explanations(claim_detail, out_lang)
+        self._add_explanations(claim_detail, out_lang, today)
         logger.info(f"== Done in {time.time() - st_time:.1f}s")
         return self._finalize_factcheck(raw_text, claim_detail, ctx)
 
@@ -195,7 +209,7 @@ class FactCheck:
             getattr(self, attr).llm_client.reset_usage()
 
     def _merge_claim_details(
-        self, claim2doc: dict, claim2checkworthy: dict, claim2queries: dict, claim2verifications: dict, **_
+        self, claim2doc: dict, claim2checkworthy: dict, claim2queries: dict, claim2verifications: dict, today=None, **_
     ) -> list[ClaimDetail]:
         claim_details = []
         for i, (claim, origin) in enumerate(claim2doc.items()):
@@ -208,7 +222,8 @@ class FactCheck:
                 end=origin["end"],
             )
             if claim in claim2verifications:
-                evidences = claim2verifications.get(claim, [])
+                evidences = apply_relevance_rules(claim, claim2verifications.get(claim, []), today)
+                evidences = rank_evidence(evidences, today)  # most useful sources first
                 verdict, reason, strength = decide_verdict(evidences)
                 labels = [e.relationship for e in evidences]
                 sup, ref = labels.count("SUPPORTS"), labels.count("REFUTES")
@@ -216,6 +231,9 @@ class FactCheck:
                 notes = evidence_notes(claim, evidences)
                 if not evidences:
                     notes.insert(0, "The search returned no usable results for this claim.")
+                if is_time_sensitive(claim):
+                    notes.insert(0, f"This claim is about a situation that can change, so only reports from the last "
+                                    f"{RECENT_DAYS} days were counted for or against it. Older reports are shown as context.")
                 claim_obj = ClaimDetail(
                     **common,
                     checkworthy=True,
@@ -240,7 +258,7 @@ class FactCheck:
             claim_details.append(claim_obj)
         return claim_details
 
-    def _add_explanations(self, claim_details: list[ClaimDetail], out_lang: str) -> None:
+    def _add_explanations(self, claim_details: list[ClaimDetail], out_lang: str, today=None) -> None:
         """Ask the LLM for a short plain-language explanation of each (rule-decided) verdict."""
         targets = [c for c in claim_details if c.checkworthy]
         template = getattr(self.prompt, "summary_prompt", None)
@@ -248,17 +266,23 @@ class FactCheck:
             c.explanation = self._fallback_explanation(c)
         if not template or not targets:
             return
+        stance_words = {"SUPPORTS": "supports the claim", "REFUTES": "contradicts the claim",
+                        "PARTIAL": "partly supports the claim", "CONTEXT": "context only (not counted)"}
         prompts = []
         for c in targets:
             lines = [
-                f"- {e.relationship} ({e.publisher or e.domain or 'unknown source'}): {e.reasoning}"
-                for e in c.evidences
+                f"- {stance_words.get(e.relationship, e.relationship)}; "
+                f"{'about a related video/post/rumour/event, not the claim itself' if e.scope == 'related' else 'about the claim itself'}; "
+                f"{e.publisher or e.domain or 'unknown source'}; {e.published_date or 'date unknown'}; {e.reasoning}"
+                f"{'; caveat: ' + e.note if e.note else ''}"
+                for e in c.evidences  # already ranked: deciding evidence first
                 if e.relationship != "IRRELEVANT"
             ] or ["- (no relevant evidence was found)"]
             prompts.append(
                 template.format(
                     claim=c.claim,
-                    verdict=f"{VERDICT_LABELS[c.verdict]} - {c.verdict_reason}",
+                    today=(today or datetime.now(timezone.utc).date()).isoformat(),
+                    verdict=f"{VERDICT_LABELS[c.verdict]}: {VERDICT_HEADLINES[c.verdict]} Rule applied: {c.verdict_reason}",
                     evidence="\n".join(lines[:12]),
                     output_language=out_lang,
                 )
@@ -278,13 +302,16 @@ class FactCheck:
 
     @staticmethod
     def _fallback_explanation(c: ClaimDetail) -> str:
+        """Plain-language explanation used when the AI explanation is unavailable."""
         s = c.strength or {}
-        if c.verdict == VERDICT_INSUFFICIENT and not s.get("support_sources") and not s.get("contradict_sources"):
-            return c.verdict_reason
-        return (
-            f"{c.verdict_reason} Supporting sources: {s.get('support_sources', 0)}; "
-            f"contradicting sources: {s.get('contradict_sources', 0)}."
-        )
+        related = sum(1 for e in c.evidences if e.scope == "related" or (e.note and e.relationship == "CONTEXT"))
+        parts = [c.verdict_reason]
+        if s.get("support_sources") or s.get("contradict_sources"):
+            parts.append(f"{s.get('support_sources', 0)} independent source(s) support it and "
+                         f"{s.get('contradict_sources', 0)} contradict it.")
+        if related:
+            parts.append(f"{related} report(s) concern related videos, posts or older events and were not counted.")
+        return " ".join(parts)
 
     def _finalize_factcheck(
         self, raw_text: str, claim_detail: list[ClaimDetail], context: dict, warnings: list = None, return_dict: bool = True

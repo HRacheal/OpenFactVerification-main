@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Review transcript - Kweli Lens AI{% endblock %}
+{% block content %}
+{% set x = t.extracted %}
+<section class="report-head">
+  <h1>Review the transcript</h1>
+  <p class="meta">{{ t.type|capitalize }} file{% if t.filename %} “{{ t.filename }}”{% endif %}
+    {% if x.duration_seconds %} · Length {{ format_timestamp(x.duration_seconds) }}{% endif %}
+    {% if x.spoken_language %} · Detected language: {{ x.spoken_language }}{% if x.language_probability %} ({{ (x.language_probability * 100)|round|int }}% confidence){% endif %}{% endif %}
+    {% if x.speech_model %} · Speech model: {{ x.speech_model }} (runs locally){% endif %}</p>
+</section>
+
+<div class="alert alert-info" role="note">
+  <strong>Nothing has been fact-checked yet.</strong> Speech recognition makes mistakes, especially with names,
+  numbers and local languages. Correct the text below, then fact-check it. For long recordings, tick only the
+  statements that make factual claims. Not every sentence needs checking, and a sentence is not false just
+  because it appears here.
+</div>
+
+{% if not status.llm_ready or not status.search_ready %}
+<div class="alert alert-warn" role="alert"><strong>Fact-checking is not configured on this server yet.</strong>
+  You can read and copy the transcript, but checking it needs
+  {% if not status.llm_ready %}<code>{{ status.llm_key_name }}</code>{% endif %}
+  {% if not status.llm_ready and not status.search_ready %} and {% endif %}
+  {% if not status.search_ready %}<code>SERPER_API_KEY</code>{% endif %} in the <code>.env</code> file.</div>
+{% endif %}
+
+{% if t.notes %}<ul class="notes">{% for n in t.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+
+<form class="card" method="post" action="{{ url_for('check') }}" id="transcript-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="input_type" value="text">
+  <input type="hidden" name="transcript_id" value="{{ job_id }}">
+  {% for k, v in t.settings.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+
+  {% if x.transcript %}
+  <h2>What was said (speech transcript)</h2>
+  {% if x.segments and x.segments|length > 1 %}
+  <p class="hint">Tick statements to check only those, or edit the full text in the box below.</p>
+  <ol class="segments">
+    {% for s in x.segments %}
+    <li><label class="segment"><input type="checkbox" class="seg-pick" data-text="{{ s.text }}">
+      <span class="ts">{{ format_timestamp(s.start) }}–{{ format_timestamp(s.end) }}</span>
+      <span class="seg-text">{{ s.text }}</span></label></li>
+    {% endfor %}
+  </ol>
+  <p><button type="button" class="btn-secondary hidden" id="use-selected">Tick statements to check only those</button>
+     <button type="button" class="btn-link hidden" id="restore-transcript">Restore the full transcript</button></p>
+  {% endif %}
+  {% endif %}
+
+  <label for="text">Text to fact-check (you can correct transcription mistakes here)</label>
+  <textarea id="text" name="text" rows="9" maxlength="{{ MAX_TEXT_CHARS }}">{{ x.transcript }}</textarea>
+  <p class="hint">Up to {{ MAX_TEXT_CHARS }} characters.</p>
+
+  {% if x.on_screen_text or x.description %}
+  <h2>What appears on screen (separate from the speech)</h2>
+  <p class="hint">Read from a few sampled video frames by an AI vision model. This is a separate source from the
+    speech: the two may not agree, and on-screen text does not confirm what is said.</p>
+  {% if x.on_screen_text %}<h3>On-screen text</h3><p class="pre">{{ x.on_screen_text }}</p>
+  <label class="inline"><input type="checkbox" name="include_onscreen" value="1" {% if not x.transcript %}checked{% endif %}>
+    Also fact-check the on-screen text</label>{% endif %}
+  {% if x.description %}<h3>Visual description (AI)</h3><p>{{ x.description }}</p>{% endif %}
+  {% endif %}
+
+  <button class="btn-primary" type="submit" id="submit-btn">Fact-check this text</button>
+  <p class="hint">The recording itself has already been deleted from the server. This transcript is kept only in
+    memory for up to an hour, for this browser only.</p>
+</form>
+<p><a href="{{ url_for('index') }}">Start a new check</a></p>
+{% endblock %}

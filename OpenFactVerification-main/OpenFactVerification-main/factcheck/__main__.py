@@ -5,6 +5,7 @@ Examples (run from the project root with the virtual environment active):
   python -m factcheck --modal text --input demo_data/text.txt
   python -m factcheck --modal url --input https://example.com/article
   python -m factcheck --modal image --input demo_data/image.webp
+  python -m factcheck --modal audio --input demo_data/speech.mp3   (local faster-whisper transcription)
 """
 
 import json
@@ -12,9 +13,9 @@ import argparse
 import os
 import sys
 
-from factcheck.utils.llmclient import CLIENTS, LLMError, GPTClient
+from factcheck.utils.llmclient import CLIENTS, LLMError
 from factcheck.utils.utils import load_yaml
-from factcheck.utils.api_config import load_api_config
+from factcheck.utils.transcription import get_transcriber
 from factcheck.core.Retriever import RetrievalError
 from factcheck import FactCheck, inputs
 
@@ -31,8 +32,7 @@ def check(args):
         default_model=args.model, client=args.client, api_config=api_config, prompt=args.prompt, retriever=args.retriever
     )
 
-    cfg = load_api_config(api_config)
-    transcriber = GPTClient(api_config=cfg) if cfg.get("OPENAI_API_KEY") else None
+    transcriber = get_transcriber() if args.modal in ("speech", "audio", "video") else None
     modal = {"speech": "audio", "string": "text_string"}.get(args.modal, args.modal)
     if modal == "text_string":
         media = inputs.prepare_text(args.input)
@@ -42,7 +42,8 @@ def check(args):
     elif modal == "url":
         media = inputs.prepare_url(args.input)
     else:
-        media = inputs.prepare_media(modal, args.input, vision_client=factcheck.vision_client, transcriber=transcriber)
+        media = inputs.prepare_media(modal, args.input, vision_client=factcheck.vision_client, transcriber=transcriber,
+                                     language=args.language, progress=lambda m: print(m, file=sys.stderr))
 
     res = factcheck.check_text(media.text, country=args.country, language=args.language, output_language=args.output_language)
     res["input"] = {"type": modal, "extracted": media.extracted, "notes": media.notes}

@@ -13,5 +13,10 @@ requests>=2.31
 tiktoken>=0.6.0
 gunicorn>=23.0.0
 
+# Local speech-to-text (no API key). The model (~145 MB for 'base') downloads on first use.
+faster-whisper>=1.1.0
+# faster-whisper 1.2.x calls av.open(..., metadata_errors=...), which PyAV 19 removed.
+av>=11,<19
+
 # Development / testing
 pytest>=8.0

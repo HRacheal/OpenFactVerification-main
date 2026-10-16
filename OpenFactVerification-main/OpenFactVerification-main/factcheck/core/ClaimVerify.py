@@ -73,7 +73,11 @@ class ClaimVerify:
             basis = "inferred"
         if not quote and basis == "explicit":
             basis = "inferred"
-        return {"reasoning": reasoning, "relationship": relationship, "basis": basis, "quote": quote}
+        # "related": the evidence is about a related video/post/rumour/event rather than the claim itself.
+        # Verdict.apply_relevance_rules turns such evidence into context; unknown values count as direct.
+        scope = str(data.get("scope", "direct") or "direct").strip().lower()
+        scope = "related" if scope == "related" else "direct"
+        return {"reasoning": reasoning, "relationship": relationship, "basis": basis, "quote": quote, "scope": scope}
 
     def _verify_all_claims(
         self,

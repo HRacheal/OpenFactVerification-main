@@ -19,7 +19,7 @@ INPUT_TYPES = ("text", "url", "image", "audio", "video")
 # Upload limits in bytes and the file extensions shown to users.
 UPLOAD_LIMITS = {
     "image": (10 * 1024 * 1024, ("png", "jpg", "jpeg", "webp")),
-    "audio": (25 * 1024 * 1024, ("wav", "mp3", "m4a", "ogg")),  # 25 MB = OpenAI transcription limit
+    "audio": (50 * 1024 * 1024, ("mp3", "wav", "m4a", "ogg", "opus", "flac", "aac", "webm")),
     "video": (100 * 1024 * 1024, ("mp4", "m4v", "mov", "webm")),
 }
 
@@ -82,7 +82,10 @@ def check_extension(input_type: str, filename: str) -> None:
         raise InputError(f"Unsupported {input_type} file type. Allowed: {', '.join(exts).upper()}.")
 
 
-def prepare_media(input_type: str, path: str, vision_client=None, transcriber=None) -> MediaResult:
+def prepare_media(input_type: str, path: str, vision_client=None, transcriber=None, language: str = None,
+                  progress=None) -> MediaResult:
+    """`transcriber`: a factcheck.utils.transcription.WhisperTranscriber (or None if unavailable).
+    `language`: "en", "sw", "lg" or "auto" (speech recognition hint). `progress(message)` is optional."""
     check_upload_size(input_type, os.path.getsize(path))
     try:
         if input_type == "image":
@@ -90,9 +93,9 @@ def prepare_media(input_type: str, path: str, vision_client=None, transcriber=No
                 raise MediaError("Image analysis needs a vision-capable AI model to be configured.")
             return image2text(path, vision_client)
         if input_type == "audio":
-            return voice2text(path, transcriber)
+            return voice2text(path, transcriber, language=language, progress=progress)
         if input_type == "video":
-            return video2text(path, vision_client, transcriber)
+            return video2text(path, vision_client, transcriber, language=language, progress=progress)
     except MediaError as e:
         raise InputError(str(e))
     raise InputError(f"Unknown input type {input_type!r}.")

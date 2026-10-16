@@ -109,6 +109,15 @@ Rules:
    dataset or survey) and the time period.
 5. Where useful, add one query aimed at existing fact-checks (e.g. "<topic> fact check").
 6. Do not answer the claim. Do not invent facts that are not in the claim.
+7. If the claim is about a situation that can change (whether someone is alive or dead, detained, ill, in
+   office, missing), search for the person's LATEST news and official statements (e.g. "<name> latest news",
+   "<name> today", "<office> official statement"), not only for the rumour. Do not add a year that the claim
+   does not state.
+
+Example
+Claim: President Museveni has died.
+Context: Country: Uganda
+Output: {{"Questions": ["President Museveni latest news", "Museveni State House Uganda statement", "Museveni death rumour fact check"]}}
 
 Example
 Claim: Kenya's new 2026 education policy reduced university fees by 50%.
@@ -141,28 +150,52 @@ Important:
 - "basis" is "explicit" if the evidence directly states it, "inferred" if you had to reason beyond what it says.
 - "quote" must be a short passage copied EXACTLY from the evidence text (in its original language) that your
   judgement relies on. Use "" if there is none.
+- Words in common are not enough: the evidence must be about the SAME fact as the claim.
+- "scope" is "direct" if the evidence speaks about the claim itself, or "related" if it is about something
+  connected but different: a video, photo, post or rumour about the claim (e.g. "a video claiming X is fake"),
+  an earlier or different event, or a different person or place. A report that a video or post is fake or
+  manipulated shows that the MEDIA is false; it does not by itself show whether the underlying claim is true
+  or false. Such evidence is "related" and normally "CONTEXT", unless it ALSO directly states the fact
+  (e.g. "X is alive and addressed a rally on 14 October"), in which case it is "direct".
+- Time matters. Use today's date from [context] and the publication date in [evidence source]. For a claim about
+  the current situation (someone is dead, arrested, ill, in office ...), evidence only confirms or contradicts it
+  if it describes the situation at or after the time the claim is about. Older evidence is "CONTEXT".
+  Mention the relevant date in your reasoning.
 - Write "reasoning" in {output_language}, in one to three plain sentences.
 
-Return JSON only with keys "reasoning", "relationship", "basis", "quote".
+Return JSON only with keys "reasoning", "relationship", "basis", "quote", "scope".
 
 Example
 [claim]: Kampala is the capital of Uganda.
 [evidence text]: Kampala is the capital and largest city of Uganda.
-Output: {{"reasoning": "The evidence directly states that Kampala is Uganda's capital.", "relationship": "SUPPORTS", "basis": "explicit", "quote": "Kampala is the capital and largest city of Uganda."}}
+Output: {{"reasoning": "The evidence directly states that Kampala is Uganda's capital.", "relationship": "SUPPORTS", "basis": "explicit", "quote": "Kampala is the capital and largest city of Uganda.", "scope": "direct"}}
+
+Example
+[claim]: The Kenyan Health Minister has died.
+[evidence text]: A video circulating on TikTok that claims to show the minister's funeral is fake. The footage is from a 2019 funeral in Nigeria.
+Output: {{"reasoning": "The evidence shows that a video is fake, but it does not say whether the minister is alive or dead.", "relationship": "CONTEXT", "basis": "explicit", "quote": "claims to show the minister's funeral is fake", "scope": "related"}}
 
 Output (JSON only):
 """
 
-summary_prompt = """You write a short, neutral explanation of a fact-check result for a journalist.
+summary_prompt = """You write a short, neutral explanation of a fact-check result for an ordinary reader with no
+fact-checking background.
 
 Claim: {claim}
-Verdict (already decided by fixed rules — do not change it): {verdict}
-Evidence assessments (stance, source, reasoning):
+Date of this check: {today}
+Verdict (already decided by fixed rules; do not change or soften it): {verdict}
+Evidence assessments (stance; scope; publisher; publication date; what the source says; caveat):
 {evidence}
 
-Write 2 to 4 plain sentences in {output_language} that explain why this verdict was reached, mention any
-disagreement between sources, and state what is still uncertain or missing. Only use the information above.
-Do not add facts. Keep names, numbers and dates exactly as they appear.
+Write 2 to 4 short sentences in simple {output_language}:
+1. Why this verdict: what the most important evidence shows, naming the publisher and date when known
+   ("Reuters reported on 14 October 2026 that ...").
+2. If any evidence is about a related video, post or rumour rather than the claim itself, say plainly that it
+   is about that media and does not by itself prove or disprove the claim.
+3. What is still uncertain or missing, if anything. If the verdict is "Unverified", say that this does not
+   mean the claim is false.
+Rules: use only the information above; never add facts, sources or dates. Keep names, numbers and dates exactly
+as they appear. No jargon (do not say "weight", "stance" or "scope").
 
 Return JSON only: {{"explanation": "..."}}
 """
